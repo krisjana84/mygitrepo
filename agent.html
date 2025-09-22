@@ -1,0 +1,110 @@
+<!-- agent.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Agent - Speech to Transcript (Prototype)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 18px; }
+    #log { white-space: pre-wrap; background:#f6f6f6; padding:10px; border-radius:6px; height:200px; overflow:auto;}
+    button { margin-right:8px; padding:8px 12px; }
+  </style>
+</head>
+<body>
+  <h2>Agent - Live Speech → Transcript</h2>
+  <p>Browser Speech-to-Text (Web Speech API). Click Start and speak. Each recognized chunk is sent to the backend.</p>
+
+  <div>
+    <button id="startBtn">Start</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <span id="status">disconnected</span>
+  </div>
+
+  <h4>Local Transcript Log</h4>
+  <div id="log">No transcript yet.</div>
+
+  <script>
+    const startBtn = document.getElementById('startBtn')
+    const stopBtn = document.getElementById('stopBtn')
+    const statusEl = document.getElementById('status')
+    const log = document.getElementById('log')
+
+    // Adjust the WS host if backend is on a different origin
+    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8000/ws/agent'
+    let ws
+
+    function connectWs() {
+      ws = new WebSocket(wsUrl)
+      ws.onopen = () => {
+        statusEl.textContent = 'connected'
+        appendLog('[ws] connected to backend')
+      }
+      ws.onclose = () => {
+        statusEl.textContent = 'disconnected'
+        appendLog('[ws] disconnected')
+      }
+      ws.onerror = (e) => appendLog('[ws] error: ' + e)
+    }
+
+    function appendLog(s) {
+      if (log.textContent === 'No transcript yet.') log.textContent = ''
+      log.textContent = new Date().toLocaleTimeString() + '  ' + s + '\n' + log.textContent
+    }
+
+    // Web Speech API (webkit prefix commonly)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      appendLog('Web Speech API not supported in this browser. Use Chrome.')
+      startBtn.disabled = true
+    }
+
+    let recog
+    startBtn.addEventListener('click', () => {
+      connectWs()
+      recog = new SpeechRecognition()
+      recog.lang = 'en-US'
+      recog.interimResults = false
+      recog.continuous = true
+
+      recog.onstart = () => {
+        appendLog('[speech] started')
+        startBtn.disabled = true
+        stopBtn.disabled = false
+      }
+
+      recog.onerror = (ev) => {
+        appendLog('[speech] error: ' + ev.error)
+      }
+
+      recog.onresult = (ev) => {
+        // send each final result to backend
+        for (let i = ev.resultIndex; i < ev.results.length; ++i) {
+          const r = ev.results[i]
+          if (r.isFinal) {
+            const text = r[0].transcript.trim()
+            appendLog('[you] ' + text)
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(text)
+              appendLog('[sent] to backend')
+            } else {
+              appendLog('[ws] not connected, attempt reconnecting...')
+              connectWs()
+              // try again shortly
+              setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(text) }, 500)
+            }
+          }
+        }
+      }
+
+      recog.start()
+    })
+
+    stopBtn.addEventListener('click', () => {
+      if (recog) { recog.stop(); appendLog('[speech] stopped') }
+      startBtn.disabled = false
+      stopBtn.disabled = true
+      if (ws) ws.close()
+    })
+  </script>
+</body>
+</html>
