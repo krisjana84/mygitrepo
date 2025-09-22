@@ -1,0 +1,70 @@
+<!-- supervisor.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Supervisor Dashboard (Simple)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 18px; }
+    #alerts { margin-top:12px; }
+    .alert { border-left:4px solid #e53935; background:#fff6f6; padding:10px; margin-bottom:10px; border-radius:6px;}
+    .transcript { border-left:4px solid #1976d2; background:#f1f8ff; padding:8px; margin-bottom:6px; border-radius:6px;}
+  </style>
+</head>
+<body>
+  <h2>Supervisor — Live Feed</h2>
+  <div>Connecting to backend...</div>
+  <div id="alerts"></div>
+  <div id="transcripts"></div>
+
+  <script>
+    const alertsEl = document.getElementById('alerts')
+    const transEl = document.getElementById('transcripts')
+
+    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8000/ws/supervisor'
+    const ws = new WebSocket(wsUrl)
+
+    ws.onopen = () => {
+      addSystem('[ws] connected')
+      // send a keepalive or identification if needed later
+    }
+    ws.onclose = () => addSystem('[ws] disconnected')
+    ws.onerror = (e) => addSystem('[ws] error: ' + e)
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data)
+        if (msg.type === 'alert') {
+          addAlert(msg)
+        } else if (msg.type === 'transcript') {
+          addTranscript(msg)
+        }
+      } catch (e) {
+        addSystem('invalid msg: ' + ev.data)
+      }
+    }
+
+    function addSystem(s) {
+      const d = document.createElement('div')
+      d.textContent = new Date().toLocaleTimeString() + ' ' + s
+      document.body.insertBefore(d, alertsEl)
+    }
+
+    function addAlert(a) {
+      const d = document.createElement('div')
+      d.className = 'alert'
+      d.innerHTML = `<strong>ALERT</strong> — Agent: ${a.agentId} — ${a.emotion} (${a.score.toFixed(2)})<br/><div style="margin-top:6px">${a.text}</div><div style="font-size:11px;color:#666;margin-top:6px">${new Date(a.ts).toLocaleString()}</div>`
+      alertsEl.prepend(d)
+    }
+
+    function addTranscript(t) {
+      const d = document.createElement('div')
+      d.className = 'transcript'
+      d.innerHTML = `<strong>${t.agentId}</strong> — ${t.emotion} (${t.score.toFixed(2)})<div style="margin-top:4px">${t.text}</div>`
+      transEl.prepend(d)
+      // keep only last 50 transcripts
+      while (transEl.childNodes.length > 50) transEl.removeChild(transEl.lastChild)
+    }
+  </script>
+</body>
+</html>
